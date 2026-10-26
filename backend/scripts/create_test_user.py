@@ -3,8 +3,8 @@ from getpass import getpass
 import psycopg
 from email_validator import validate_email, EmailNotValidError
 
-from database import get_connection
-from security import hash_password
+from app.database import get_connection
+from app.security import hash_password
 
 
 def main():
