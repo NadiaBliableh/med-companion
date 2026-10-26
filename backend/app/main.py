@@ -3,6 +3,7 @@ from fastapi import FastAPI
 
 from app.auth.router import router as auth_router
 from app.exception_handlers import register_exception_handlers
+from app.students.router import router as students_router
 
 
 app = FastAPI(
@@ -15,7 +16,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -28,3 +29,4 @@ def health():
 
 
 app.include_router(auth_router)
+app.include_router(students_router)
