@@ -10,8 +10,8 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import Literal
 from pydantic import ConfigDict, field_validator
 
-from database import get_connection
-from security import (
+from app.database import get_connection
+from app.security import (
     generate_session_token,
     hash_password,
     hash_session_token,

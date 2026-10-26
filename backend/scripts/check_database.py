@@ -1,6 +1,6 @@
 import psycopg
 
-from database import get_connection
+from app.database import get_connection
 
 
 def main():
