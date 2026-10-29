@@ -1,5 +1,6 @@
-from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.router import router as auth_router
 from app.exception_handlers import register_exception_handlers
@@ -10,14 +11,14 @@ app = FastAPI(
     title="Med Companion API",
     version="0.1.0",
 )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_origins=[],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 register_exception_handlers(app)
