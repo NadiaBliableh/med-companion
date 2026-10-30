@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'services/auth_service.dart';
+import 'profile/profile_entry.dart';
+import 'l10n/app_language.dart';
 
 void main() {
   runApp(const MedCompanionApp());
@@ -16,15 +18,29 @@ class MedCompanionApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Med Companion',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: backgroundColor,
-        useMaterial3: true,
-      ),
-      home: const LoginScreen(),  
+    return ValueListenableBuilder<String>(
+      valueListenable: appLanguage,
+      builder: (context, language, child) {
+        final isEnglish = language == 'en';
+
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'Med Companion',
+          theme: ThemeData(
+            brightness: Brightness.dark,
+            scaffoldBackgroundColor: backgroundColor,
+            useMaterial3: true,
+          ),
+          builder: (context, child) {
+            return Directionality(
+              textDirection:
+                  isEnglish ? TextDirection.ltr : TextDirection.rtl,
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
+          home: const LoginScreen(),
+        );
+      },
     );
   }
 }
@@ -45,30 +61,43 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _hidePassword = true;
   bool _rememberMe = true;
 
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
+@override
+void initState() {
+  super.initState();
+  appLanguage.addListener(_onLanguageChanged);
+}
 
- Future<void> _login() async {
+void _onLanguageChanged() {
+  if (mounted) {
+    setState(() {});
+  }
+}
+
+  @override
+void dispose() {
+  appLanguage.removeListener(_onLanguageChanged);
+  _emailController.dispose();
+  _passwordController.dispose();
+  super.dispose();
+}
+
+Future<void> _login() async {
   FocusScope.of(context).unfocus();
 
   if (!_formKey.currentState!.validate()) return;
 
   try {
-    final result = await AuthService.login(
+    await AuthService.login(
       email: _emailController.text,
       password: _passwordController.text,
     );
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Welcome ${result['user']?['full_name'] ?? ''}! Login successful.',
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => ProfileEntry(
+          loginBuilder: () => const LoginScreen(),
         ),
       ),
     );
@@ -77,7 +106,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(e.toString().replaceFirst('Exception: ', '')),
+        content: Text(
+          e.toString().replaceFirst('Exception: ', ''),
+        ),
       ),
     );
   }
@@ -157,7 +188,30 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-// Glowing heart logo with soft fading edges
+  // Language switch
+  Align(
+    alignment: AlignmentDirectional.centerEnd,
+    child: TextButton.icon(
+      onPressed: () {
+        changeAppLanguage(isEnglish ? 'ar' : 'en');
+      },
+      icon: const Icon(
+        Icons.language,
+        color: neonCyan,
+      ),
+      label: Text(
+        isEnglish ? 'العربية' : 'English',
+        style: const TextStyle(
+          color: neonCyan,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ),
+  ),
+
+  // Glowing heart logo with soft fading edges
+
 Container(
   height: 220,
   width: double.infinity,
@@ -235,13 +289,11 @@ Container(
                         ),
                         cursorColor: neonCyan,
                         decoration: _inputDecoration(
-                          hint: 'University email',
-                          icon: Icons.person_outline,
+hint: tr('البريد الإلكتروني الجامعي', 'University email'),                          icon: Icons.person_outline,
                         ),
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
-                            return 'Please enter your email';
-                          }
+return tr('يرجى إدخال البريد الإلكتروني', 'Please enter your email');                          }
 
                           if (!RegExp(
                             r'^[^@]+@[^@]+\.[^@]+$',
