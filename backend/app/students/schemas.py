@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 
 from pydantic import (
@@ -71,3 +72,56 @@ class StudentProfileUpdate(BaseModel):
                 "At least one field must be provided to update."
             )
         return self
+
+
+# ---------------------------------------------------------------------------
+# نماذج استجابة شاشة البروفايل (GET /students/me/profile-overview).
+# كلها للقراءة فقط؛ القيم تُحسب لحظيًا في الـservice ولا تُخزَّن.
+# ---------------------------------------------------------------------------
+
+
+class OverviewProfile(BaseModel):
+    full_name: str
+    avatar_url: str | None  # غير مخزَّن؛ تولّد الواجهة الأحرف الأولى من الاسم.
+    study_year: int | None
+    preferred_language: Literal["ar", "en"]
+
+
+class OverviewStats(BaseModel):
+    current_streak_days: int
+    total_study_seconds: int
+    overall_progress_percentage: float
+
+
+class ContinueLearning(BaseModel):
+    subject_id: int
+    subject_title: str
+    topic_id: int
+    topic_title: str
+    lesson_id: int
+    lesson_title: str
+    lesson_order: int
+    # عدد الدروس المنشورة والمتاحة في نفس الـtopic (مقام تقدّم الـtopic).
+    lessons_count: int
+    # حالة الدرس وفق lesson_progress: not_started (لا صف) أو in_progress.
+    # درس المتابعة لا يكون completed أبدًا (الاختيار يستبعد المكتمل).
+    # لا يوجد استئناف من موضع داخل محتوى الدرس (لا تتبّع على مستوى blocks).
+    status: Literal["not_started", "in_progress"]
+    # تقدّم على مستوى الـtopic: دروس منشورة أكملها الطالب في هذا الـtopic.
+    completed_lessons_in_topic: int
+    # completed_lessons_in_topic / lessons_count × 100 (مقرّبة).
+    topic_progress_percentage: float
+    thumbnail_url: str | None  # غير مخزَّن في lessons؛ يبقى null حاليًا.
+
+
+class WeeklyActivityItem(BaseModel):
+    date: date
+    study_seconds: int
+
+
+class ProfileOverviewResponse(BaseModel):
+    profile: OverviewProfile
+    stats: OverviewStats
+    continue_learning: ContinueLearning | None
+    weekly_activity: list[WeeklyActivityItem]
+    saved_lessons_count: int

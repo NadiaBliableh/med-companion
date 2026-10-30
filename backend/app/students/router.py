@@ -1,8 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.dependencies import get_current_session
-from app.students.schemas import StudentProfileResponse, StudentProfileUpdate
-from app.students.service import get_student_profile, update_student_profile
+from app.students.schemas import (
+    ProfileOverviewResponse,
+    StudentProfileResponse,
+    StudentProfileUpdate,
+)
+from app.students.service import (
+    get_profile_overview,
+    get_student_profile,
+    update_student_profile,
+)
 
 
 router = APIRouter(prefix="/students")
@@ -38,3 +46,13 @@ def update_my_profile(
     profile = update_student_profile(session["id"], changes)
     response.headers["Cache-Control"] = "no-store"
     return profile
+
+
+@router.get("/me/profile-overview", response_model=ProfileOverviewResponse)
+def read_my_profile_overview(
+    response: Response,
+    session=Depends(get_student_session),
+):
+    overview = get_profile_overview(session["id"])
+    response.headers["Cache-Control"] = "no-store"
+    return overview
