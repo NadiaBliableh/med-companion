@@ -51,7 +51,11 @@ class OutlineLesson(BaseModel):
     # حالة الدرس لهذا الطالب فقط، من lesson_progress:
     #   not_started (لا صف) / in_progress / completed.
     status: Literal["not_started", "in_progress", "completed"]
-    # هل الدرس جاهز للدراسة؟ false ⇒ "Coming soon" + عطّل زر الدخول.
+    # هل يمكن فتح الدرس وعرض محتواه الحالي؟ = منشور وله محتوى (بلوكات).
+    # يُشغّل/يُعطّل زرّ الدرس. قد يكون true بينما is_available=false (محتوى جزئي).
+    can_open: bool
+    # هل اكتمل تجهيز الدرس للدراسة؟ (قرار صريح). يقود التقدّم والمتابعة.
+    # can_open=true مع is_available=false ⇒ اعرضي "More sections coming soon".
     is_available: bool
     thumbnail_url: str | None  # غير مخزَّن ⇒ null حاليًا.
 
@@ -79,3 +83,36 @@ class SubjectOutlineResponse(BaseModel):
     title: str
     description: str | None
     topics: list[OutlineTopic]
+
+
+# --- تفاصيل الدرس: أقسام مرتبة، كل قسم قائمة بلوكات مرتبة ---
+
+
+class LessonBlock(BaseModel):
+    display_order: int
+    block_type: Literal["text", "image", "video", "model_3d"]
+    title: str | None
+    text: str | None  # مصدره lesson_blocks.text_content.
+    resource_url: str | None  # لا تُحقن روابط وهمية؛ null ما لم يوجد أصل حقيقي.
+    alternative_text: str | None
+
+
+class LessonSection(BaseModel):
+    # مفتاح القسم (مثل "overview")، من lesson_blocks.section.
+    key: str
+    display_order: int
+    blocks: list[LessonBlock]
+
+
+class LessonDetailResponse(BaseModel):
+    id: int
+    title: str
+    description: str | None
+    # قابل للفتح (منشور وله محتوى). عبر المسار العام يكون true دائمًا لأن غير
+    # القابل للفتح يُعاد 404.
+    can_open: bool
+    # جاهزية الدرس للدراسة (قرار صريح). قد يكون false مع can_open=true أثناء
+    # تجهيز المحتوى تدريجيًا ⇒ اعرضي "More sections coming soon".
+    is_available: bool
+    status: Literal["not_started", "in_progress", "completed"]
+    sections: list[LessonSection]

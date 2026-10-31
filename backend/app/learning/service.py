@@ -4,27 +4,26 @@ from app.database import get_connection
 
 
 # ---------------------------------------------------------------------------
-# قسم Learn: قائمة المواد المنشورة، ومخطط المادة (المواضيع ودروسها + حالة
-# الطالب). كل القيم تُحسب لحظيًا، وكل الاستعلامات SELECT فقط (قراءة محضة):
-# تنفيذ GET لا يُنشئ ولا يعدّل أي صف (لا lesson_progress تلقائيًا).
+# قسم Learn: قائمة المواد، مخطط المادة، وتفاصيل الدرس (أقسامه المرتبة).
+# كل الاستعلامات SELECT فقط (قراءة محضة): تنفيذ GET لا يُنشئ ولا يعدّل أي صف
+# (لا lesson_progress تلقائيًا).
 #
 # العناوين تُعاد بالإنجليزية دائمًا (name_en / title_en)؛ لغة الواجهة مسؤولية
-# الفرونت. النشر مُمثَّل على مستوى الدرس فقط (lessons.status).
+# الفرونت. النشر مُمثَّل على مستوى الدرس (lessons.status).
 #
-# إتاحة المحتوى منفصلة عن تقدّم الطالب:
-#   - درس "متاح للدراسة" = منشور وله بلوك محتوى واحد على الأقل (lesson_blocks).
-#   - درس منشور بلا محتوى = "Coming soon": يُعرَض عنوانًا فقط، ولا يُحتسب ضمن
-#     الدروس المتاحة ولا في نسبة التقدّم.
+# إتاحة المحتوى منفصلة عن تقدّم الطالب وعن مجرّد وجود بلوكات:
+#   - درس "متاح للدراسة" = منشور و is_content_ready = TRUE (قرار صريح).
+#     مجرّد وجود بلوك (مثل قسم Overview) لا يجعله متاحًا.
+#   - درس منشور غير جاهز = "Coming soon": يُعرَض عنوانًا فقط، ولا يُحتسب ضمن
+#     الدروس المتاحة ولا في نسبة التقدّم، ولا يُفتح محتواه للطالب.
 #
-# student_id يأتي من الجلسة فقط ⇒ عزل تام. عدد الاستعلامات ثابت لكل نقطة
-# (لا N+1).
+# student_id يأتي من الجلسة فقط ⇒ عزل تام. عدد الاستعلامات ثابت لكل نقطة.
 # ---------------------------------------------------------------------------
 
 
 def list_published_subjects():
     # استعلام واحد: ضمّ المواد بالمواضيع بالدروس المنشورة فقط، وتجميع.
-    # INNER JOIN على الدروس المنشورة يُقصي المواد بلا محتوى منشور.
-    # LEFT JOIN على lesson_blocks لتمييز الدروس الجاهزة (المتاحة) من غيرها.
+    # available_lessons_count يَعُدّ الدروس الجاهزة (is_content_ready) فقط.
     # subjects بلا display_order ⇒ الترتيب بالـid.
     with get_connection() as connection:
         rows = connection.execute(
@@ -36,13 +35,12 @@ def list_published_subjects():
                 count(DISTINCT t.id) AS topics_count,
                 count(DISTINCT l.id) AS lessons_count,
                 count(DISTINCT l.id) FILTER (
-                    WHERE lb.lesson_id IS NOT NULL
+                    WHERE l.is_content_ready
                 ) AS available_lessons_count
             FROM public.subjects AS s
             JOIN public.topics AS t ON t.subject_id = s.id
             JOIN public.lessons AS l
               ON l.topic_id = t.id AND l.status = 'published'
-            LEFT JOIN public.lesson_blocks AS lb ON lb.lesson_id = l.id
             GROUP BY s.id, s.name_en, s.description
             ORDER BY s.id;
             """
@@ -74,7 +72,7 @@ def get_subject_outline(subject_id, student_id):
         ).fetchone()
 
         # استعلام واحد لكل المواضيع المنشورة ودروسها المنشورة + حالة الطالب
-        # + توفّر المحتوى (is_available عبر EXISTS على lesson_blocks).
+        # + جاهزية المحتوى (is_available = is_content_ready).
         rows = connection.execute(
             """
             SELECT
@@ -87,10 +85,11 @@ def get_subject_outline(subject_id, student_id):
                 l.summary,
                 l.display_order AS lesson_order,
                 lp.status AS progress_status,
+                l.is_content_ready AS is_available,
                 EXISTS (
                     SELECT 1 FROM public.lesson_blocks AS lb
                     WHERE lb.lesson_id = l.id
-                ) AS is_available
+                ) AS can_open
             FROM public.topics AS t
             JOIN public.lessons AS l
               ON l.topic_id = t.id AND l.status = 'published'
@@ -131,7 +130,7 @@ def get_subject_outline(subject_id, student_id):
         current["lessons_count"] += 1
         if is_available:
             current["available_lessons_count"] += 1
-            # المكتمل يُحتسب فقط إن كان الدرس متاحًا (منشور وله محتوى).
+            # المكتمل يُحتسب فقط إن كان الدرس متاحًا (جاهز المحتوى).
             if status == "completed":
                 current["completed_lessons"] += 1
         current["lessons"].append(
@@ -141,6 +140,7 @@ def get_subject_outline(subject_id, student_id):
                 "description": row["summary"],
                 "display_order": row["lesson_order"],
                 "status": status,
+                "can_open": row["can_open"],
                 "is_available": is_available,
                 "thumbnail_url": None,
             }
@@ -159,4 +159,94 @@ def get_subject_outline(subject_id, student_id):
         "title": subject["name_en"],
         "description": subject["description"],
         "topics": topics,
+    }
+
+
+def get_lesson_detail(lesson_id, student_id):
+    """تفاصيل درس وأقسامه المرتبة (قراءة فقط).
+
+    يُعرَض محتوى الدرس المنشور **القابل للفتح** (له محتوى/بلوكات)، حتى لو لم
+    يكتمل تجهيزه (is_content_ready=false) — دعمًا لعرض المحتوى تدريجيًا. أمّا:
+      - الدرس غير المنشور ⇒ 404 (محجوب دائمًا).
+      - الدرس المنشور بلا محتوى (غير قابل للفتح، "Coming soon") ⇒ 404.
+    can_open في الاستجابة = منشور وله محتوى (true دائمًا هنا عند النجاح).
+    is_available يبقى مرتبطًا بالجاهزية (is_content_ready) ولا يتأثّر بالفتح.
+    """
+    with get_connection() as connection:
+        lesson = connection.execute(
+            """
+            SELECT
+                l.id,
+                l.title_en,
+                l.summary,
+                l.status,
+                l.is_content_ready,
+                lp.status AS progress_status,
+                EXISTS (
+                    SELECT 1 FROM public.lesson_blocks AS lb
+                    WHERE lb.lesson_id = l.id
+                ) AS has_content
+            FROM public.lessons AS l
+            LEFT JOIN public.lesson_progress AS lp
+              ON lp.lesson_id = l.id AND lp.student_id = %(sid)s
+            WHERE l.id = %(lid)s;
+            """,
+            {"sid": student_id, "lid": lesson_id},
+        ).fetchone()
+
+        if lesson is None or lesson["status"] != "published":
+            raise HTTPException(status_code=404, detail="Lesson not found.")
+        if not lesson["has_content"]:
+            # منشور لكن بلا محتوى (غير قابل للفتح، "Coming soon") ⇒ لا شيء يُعرَض.
+            raise HTTPException(status_code=404, detail="Lesson not found.")
+
+        blocks = connection.execute(
+            """
+            SELECT
+                COALESCE(section, 'general') AS section,
+                display_order,
+                block_type,
+                title,
+                text_content,
+                resource_url,
+                alternative_text
+            FROM public.lesson_blocks
+            WHERE lesson_id = %s
+            ORDER BY display_order, id;
+            """,
+            (lesson_id,),
+        ).fetchall()
+
+    # تجميع البلوكات في أقسام مرتبة. ترتيب القسم = أصغر display_order فيه
+    # (أول ظهور لأن الصفوف مرتبة تصاعديًا).
+    sections = []
+    index = {}
+    for block in blocks:
+        key = block["section"]
+        if key not in index:
+            index[key] = {
+                "key": key,
+                "display_order": block["display_order"],
+                "blocks": [],
+            }
+            sections.append(index[key])
+        index[key]["blocks"].append(
+            {
+                "display_order": block["display_order"],
+                "block_type": block["block_type"],
+                "title": block["title"],
+                "text": block["text_content"],
+                "resource_url": block["resource_url"],
+                "alternative_text": block["alternative_text"],
+            }
+        )
+
+    return {
+        "id": lesson["id"],
+        "title": lesson["title_en"],
+        "description": lesson["summary"],
+        "can_open": True,  # نجَح الفتح ⇒ منشور وله محتوى.
+        "is_available": lesson["is_content_ready"],
+        "status": lesson["progress_status"] or "not_started",
+        "sections": sections,
     }

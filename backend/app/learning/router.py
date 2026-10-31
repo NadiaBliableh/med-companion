@@ -1,7 +1,15 @@
 from fastapi import APIRouter, Depends, Response
 
-from app.learning.schemas import SubjectListResponse, SubjectOutlineResponse
-from app.learning.service import get_subject_outline, list_published_subjects
+from app.learning.schemas import (
+    LessonDetailResponse,
+    SubjectListResponse,
+    SubjectOutlineResponse,
+)
+from app.learning.service import (
+    get_lesson_detail,
+    get_subject_outline,
+    list_published_subjects,
+)
 from app.students.router import get_student_session
 
 
@@ -31,3 +39,20 @@ def read_subject_outline(
     outline = get_subject_outline(subject_id, session["id"])
     response.headers["Cache-Control"] = "no-store"
     return outline
+
+
+@router.get(
+    "/lessons/{lesson_id}",
+    response_model=LessonDetailResponse,
+    responses={404: {"description": "Lesson not found or not available"}},
+)
+def read_lesson(
+    lesson_id: int,
+    response: Response,
+    session=Depends(get_student_session),
+):
+    # يُعرَض محتوى الدرس المنشور القابل للفتح (له محتوى) حتى لو لم يكتمل
+    # تجهيزه. غير المنشور أو بلا محتوى ("Coming soon") ⇒ 404.
+    lesson = get_lesson_detail(lesson_id, session["id"])
+    response.headers["Cache-Control"] = "no-store"
+    return lesson

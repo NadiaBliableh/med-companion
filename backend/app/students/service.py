@@ -126,9 +126,9 @@ def _compute_streak(study_days, today):
 
 
 def _select_continue_lesson_id(connection, student_id):
-    # يُختار درس المتابعة من الدروس "المتاحة" فقط: منشور وله محتوى
-    # (lesson_blocks). الدرس المنشور بلا محتوى ("Coming soon") لا يُختار
-    # إطلاقًا، حتى لو كان له سجلّ تقدّم سابق.
+    # يُختار درس المتابعة من الدروس "المتاحة" فقط: منشور وجاهز محتواه
+    # (is_content_ready = TRUE). الدرس غير الجاهز ("Coming soon") لا يُختار
+    # إطلاقًا، حتى لو كان له محتوى (بلوكات) أو سجلّ تقدّم سابق.
     #
     # (أ) آخر درس متاح بدأه ولم يُكمله (الأحدث حسب last_accessed_at).
     row = connection.execute(
@@ -139,10 +139,7 @@ def _select_continue_lesson_id(connection, student_id):
           ON l.id = lp.lesson_id AND l.status = 'published'
         WHERE lp.student_id = %s
           AND lp.status = 'in_progress'
-          AND EXISTS (
-              SELECT 1 FROM public.lesson_blocks AS lb
-              WHERE lb.lesson_id = l.id
-          )
+          AND l.is_content_ready
         ORDER BY lp.last_accessed_at DESC, lp.lesson_id DESC
         LIMIT 1;
         """,
@@ -159,10 +156,7 @@ def _select_continue_lesson_id(connection, student_id):
         JOIN public.topics AS t ON t.id = l.topic_id
         JOIN public.subjects AS s ON s.id = t.subject_id
         WHERE l.status = 'published'
-          AND EXISTS (
-              SELECT 1 FROM public.lesson_blocks AS lb
-              WHERE lb.lesson_id = l.id
-          )
+          AND l.is_content_ready
           AND NOT EXISTS (
               SELECT 1 FROM public.lesson_progress AS lp
               WHERE lp.student_id = %s
@@ -195,10 +189,7 @@ def _build_continue_learning(connection, student_id, language):
                 COUNT(*) OVER (PARTITION BY l.topic_id) AS lessons_count
             FROM public.lessons AS l
             WHERE l.status = 'published'
-              AND EXISTS (
-                  SELECT 1 FROM public.lesson_blocks AS lb
-                  WHERE lb.lesson_id = l.id
-              )
+              AND l.is_content_ready
         )
         SELECT
             s.id AS subject_id, s.name_ar AS subject_ar, s.name_en AS subject_en,
@@ -214,10 +205,7 @@ def _build_continue_learning(connection, student_id, language):
                   AND lp2.status = 'completed'
                   AND l2.status = 'published'
                   AND l2.topic_id = l.topic_id
-                  AND EXISTS (
-                      SELECT 1 FROM public.lesson_blocks AS lb
-                      WHERE lb.lesson_id = l2.id
-                  )
+                  AND l2.is_content_ready
             ) AS completed_in_topic
         FROM ranked AS r
         JOIN public.lessons AS l ON l.id = r.lesson_id
@@ -307,19 +295,13 @@ def get_profile_overview(user_id):
                     WHERE lp.student_id = %(sid)s
                       AND lp.status = 'completed'
                       AND l.status = 'published'
-                      AND EXISTS (
-                          SELECT 1 FROM public.lesson_blocks AS lb
-                          WHERE lb.lesson_id = l.id
-                      )
+                      AND l.is_content_ready
                 ) AS completed_lessons,
                 (
                     SELECT count(*)
                     FROM public.lessons AS l
                     WHERE l.status = 'published'
-                      AND EXISTS (
-                          SELECT 1 FROM public.lesson_blocks AS lb
-                          WHERE lb.lesson_id = l.id
-                      )
+                      AND l.is_content_ready
                 ) AS published_lessons,
                 (
                     SELECT count(*)

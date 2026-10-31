@@ -109,25 +109,22 @@ def _mk_topic(c, subject_id, name_en, order):
     ).fetchone()["id"]
 
 
-def _mk_lesson(c, topic_id, title_en, order, status="published",
-               with_content=False):
-    lid = c.execute(
+def _mk_lesson(c, topic_id, title_en, order, status="published", ready=False):
+    # الإتاحة قرار صريح (is_content_ready)؛ وجود بلوكات لا يجعل الدرس متاحًا.
+    return c.execute(
         "INSERT INTO public.lessons (topic_id, title_ar, title_en, "
-        "display_order, status) VALUES (%s,%s,%s,%s,%s) RETURNING id;",
-        (topic_id, title_en + " AR", title_en, order, status),
+        "display_order, status, is_content_ready) "
+        "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id;",
+        (topic_id, title_en + " AR", title_en, order, status, ready),
     ).fetchone()["id"]
-    if with_content:
-        _mk_block(c, lid)
-    return lid
 
 
-def _mk_block(c, lesson_id, order=1):
-    # بلوك محتوى يجعل الدرس "متاحًا" (is_available). درس منشور بلا بلوك =
-    # "Coming soon" ويُستبعد من continue_learning و overall_progress.
+def _mk_block(c, lesson_id, order=1, section="overview"):
+    # بلوك محتوى. لا يؤثّر على الإتاحة (تُحدَّد بـ is_content_ready).
     c.execute(
-        "INSERT INTO public.lesson_blocks (lesson_id, block_type, "
-        "text_content, display_order) VALUES (%s,'text','content',%s);",
-        (lesson_id, order),
+        "INSERT INTO public.lesson_blocks (lesson_id, section, block_type, "
+        "text_content, display_order) VALUES (%s,%s,'text','content',%s);",
+        (lesson_id, section, order),
     )
 
 
@@ -191,17 +188,16 @@ def test_overview_calculations():
     with seeded_tx() as c:
         subj = _mk_subject(c, "Cardiovascular System")
         topic = _mk_topic(c, subj, "Heart", 0)
-        l1 = _mk_lesson(c, topic, "Intro", 1, with_content=True)
-        l2 = _mk_lesson(c, topic, "Heart Anatomy", 2, with_content=True)
-        _mk_lesson(c, topic, "Vessels", 3, with_content=True)
-        _mk_lesson(c, topic, "Circulation", 4, with_content=True)
-        _mk_lesson(c, topic, "ECG", 5, with_content=True)
+        l1 = _mk_lesson(c, topic, "Intro", 1, ready=True)
+        l2 = _mk_lesson(c, topic, "Heart Anatomy", 2, ready=True)
+        _mk_lesson(c, topic, "Vessels", 3, ready=True)
+        _mk_lesson(c, topic, "Circulation", 4, ready=True)
+        _mk_lesson(c, topic, "ECG", 5, ready=True)
         _mk_lesson(c, topic, "Draft Lesson", 6, status="draft")
-        # الدروس المتاحة (منشورة ولها محتوى) = مقام overall_progress.
+        # الدروس المتاحة (منشورة وجاهزة) = مقام overall_progress.
         published_total = c.execute(
             "SELECT count(*) n FROM public.lessons AS l "
-            "WHERE l.status='published' AND EXISTS "
-            "(SELECT 1 FROM public.lesson_blocks lb WHERE lb.lesson_id=l.id)"
+            "WHERE l.status='published' AND l.is_content_ready"
         ).fetchone()["n"]
 
         a = _mk_user(c, "Student A", 3, "en")
@@ -283,7 +279,7 @@ def test_unpublished_in_progress_is_skipped():
         topic = _mk_topic(c, subj, "Topic X", 0)
         archived = _mk_lesson(c, topic, "Archived Lesson", 1, status="archived")
         published = _mk_lesson(c, topic, "Published Lesson", 2,
-                               status="published", with_content=True)
+                               status="published", ready=True)
 
         s = _mk_user(c, "Student C", 2, "en")
         _mk_progress(c, s, archived, "in_progress")  # قيد التقدّم لكنه مؤرشَف
@@ -306,7 +302,7 @@ def test_overall_filters_consistent():
         subj = _mk_subject(c, "Subject Y")
         topic = _mk_topic(c, subj, "Topic Y", 0)
         pub = _mk_lesson(c, topic, "Pub", 1, status="published",
-                         with_content=True)
+                         ready=True)
         arch = _mk_lesson(c, topic, "Arch", 2, status="archived")
 
         s = _mk_user(c, "Student D", 2, "en")
@@ -336,15 +332,17 @@ def test_empty_state():
 
 
 def test_coming_soon_excluded_with_progress():
-    """درس "Coming soon" (منشور بلا محتوى) يُستبعد من continue_learning
-    و overall_progress حتى لو له سجلّ تقدّم سابق (in_progress)."""
+    """درس "Coming soon" غير جاهز — **حتى لو له قسم Overview (بلوكات)** وسجلّ
+    تقدّم in_progress — يُستبعد من continue_learning و overall_progress."""
     with seeded_tx() as c:
         subj = _mk_subject(c, "CS Subject")
         topic = _mk_topic(c, subj, "CS Topic", 0)
-        # درس متاح (له محتوى) أكمله الطالب.
-        avail = _mk_lesson(c, topic, "Ready", 1, with_content=True)
-        # درس Coming soon (منشور بلا بلوك) وله سجلّ in_progress أحدث.
+        # درس متاح (جاهز) أكمله الطالب.
+        avail = _mk_lesson(c, topic, "Ready", 1, ready=True)
+        # درس Coming soon: منشور، غير جاهز، لكنه **يملك بلوك Overview**
+        # وله سجلّ in_progress أحدث — يجب ألّا يُختار رغم ذلك.
         soon = _mk_lesson(c, topic, "Coming Soon", 2, status="published")
+        _mk_block(c, soon, 1, section="overview")
 
         s = _mk_user(c, "Student CS", 2, "en")
         _mk_progress(c, s, avail, "completed")
@@ -368,8 +366,8 @@ def test_all_available_completed():
     with seeded_tx() as c:
         subj = _mk_subject(c, "All Done Subject")
         topic = _mk_topic(c, subj, "T", 0)
-        a1 = _mk_lesson(c, topic, "A1", 1, with_content=True)
-        a2 = _mk_lesson(c, topic, "A2", 2, with_content=True)
+        a1 = _mk_lesson(c, topic, "A1", 1, ready=True)
+        a2 = _mk_lesson(c, topic, "A2", 2, ready=True)
         # درس Coming soon (منشور بلا بلوك) وغير مكتمل.
         _mk_lesson(c, topic, "Soon", 3, status="published")
 
