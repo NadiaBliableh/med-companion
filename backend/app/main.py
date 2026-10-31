@@ -3,6 +3,7 @@ from fastapi import FastAPI
 
 from app.auth.router import router as auth_router
 from app.exception_handlers import register_exception_handlers
+from app.learning.router import router as learning_router
 from app.students.router import router as students_router
 
 
@@ -30,3 +31,4 @@ def health():
 
 app.include_router(auth_router)
 app.include_router(students_router)
+app.include_router(learning_router)
