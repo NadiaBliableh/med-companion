@@ -109,12 +109,26 @@ def _mk_topic(c, subject_id, name_en, order):
     ).fetchone()["id"]
 
 
-def _mk_lesson(c, topic_id, title_en, order, status="published"):
-    return c.execute(
+def _mk_lesson(c, topic_id, title_en, order, status="published",
+               with_content=False):
+    lid = c.execute(
         "INSERT INTO public.lessons (topic_id, title_ar, title_en, "
         "display_order, status) VALUES (%s,%s,%s,%s,%s) RETURNING id;",
         (topic_id, title_en + " AR", title_en, order, status),
     ).fetchone()["id"]
+    if with_content:
+        _mk_block(c, lid)
+    return lid
+
+
+def _mk_block(c, lesson_id, order=1):
+    # بلوك محتوى يجعل الدرس "متاحًا" (is_available). درس منشور بلا بلوك =
+    # "Coming soon" ويُستبعد من continue_learning و overall_progress.
+    c.execute(
+        "INSERT INTO public.lesson_blocks (lesson_id, block_type, "
+        "text_content, display_order) VALUES (%s,'text','content',%s);",
+        (lesson_id, order),
+    )
 
 
 def _mk_progress(c, sid, lesson_id, status):
@@ -177,14 +191,17 @@ def test_overview_calculations():
     with seeded_tx() as c:
         subj = _mk_subject(c, "Cardiovascular System")
         topic = _mk_topic(c, subj, "Heart", 0)
-        l1 = _mk_lesson(c, topic, "Intro", 1)
-        l2 = _mk_lesson(c, topic, "Heart Anatomy", 2)
-        _mk_lesson(c, topic, "Vessels", 3)
-        _mk_lesson(c, topic, "Circulation", 4)
-        _mk_lesson(c, topic, "ECG", 5)
+        l1 = _mk_lesson(c, topic, "Intro", 1, with_content=True)
+        l2 = _mk_lesson(c, topic, "Heart Anatomy", 2, with_content=True)
+        _mk_lesson(c, topic, "Vessels", 3, with_content=True)
+        _mk_lesson(c, topic, "Circulation", 4, with_content=True)
+        _mk_lesson(c, topic, "ECG", 5, with_content=True)
         _mk_lesson(c, topic, "Draft Lesson", 6, status="draft")
+        # الدروس المتاحة (منشورة ولها محتوى) = مقام overall_progress.
         published_total = c.execute(
-            "SELECT count(*) n FROM public.lessons WHERE status='published'"
+            "SELECT count(*) n FROM public.lessons AS l "
+            "WHERE l.status='published' AND EXISTS "
+            "(SELECT 1 FROM public.lesson_blocks lb WHERE lb.lesson_id=l.id)"
         ).fetchone()["n"]
 
         a = _mk_user(c, "Student A", 3, "en")
@@ -265,7 +282,8 @@ def test_unpublished_in_progress_is_skipped():
         subj = _mk_subject(c, "Subject X")
         topic = _mk_topic(c, subj, "Topic X", 0)
         archived = _mk_lesson(c, topic, "Archived Lesson", 1, status="archived")
-        published = _mk_lesson(c, topic, "Published Lesson", 2, status="published")
+        published = _mk_lesson(c, topic, "Published Lesson", 2,
+                               status="published", with_content=True)
 
         s = _mk_user(c, "Student C", 2, "en")
         _mk_progress(c, s, archived, "in_progress")  # قيد التقدّم لكنه مؤرشَف
@@ -287,7 +305,8 @@ def test_overall_filters_consistent():
     with seeded_tx() as c:
         subj = _mk_subject(c, "Subject Y")
         topic = _mk_topic(c, subj, "Topic Y", 0)
-        pub = _mk_lesson(c, topic, "Pub", 1, status="published")
+        pub = _mk_lesson(c, topic, "Pub", 1, status="published",
+                         with_content=True)
         arch = _mk_lesson(c, topic, "Arch", 2, status="archived")
 
         s = _mk_user(c, "Student D", 2, "en")
@@ -316,6 +335,56 @@ def test_empty_state():
               and all(d["study_seconds"] == 0 for d in ov["weekly_activity"]))
 
 
+def test_coming_soon_excluded_with_progress():
+    """درس "Coming soon" (منشور بلا محتوى) يُستبعد من continue_learning
+    و overall_progress حتى لو له سجلّ تقدّم سابق (in_progress)."""
+    with seeded_tx() as c:
+        subj = _mk_subject(c, "CS Subject")
+        topic = _mk_topic(c, subj, "CS Topic", 0)
+        # درس متاح (له محتوى) أكمله الطالب.
+        avail = _mk_lesson(c, topic, "Ready", 1, with_content=True)
+        # درس Coming soon (منشور بلا بلوك) وله سجلّ in_progress أحدث.
+        soon = _mk_lesson(c, topic, "Coming Soon", 2, status="published")
+
+        s = _mk_user(c, "Student CS", 2, "en")
+        _mk_progress(c, s, avail, "completed")
+        _mk_progress(c, s, soon, "in_progress")
+
+        ov = service.get_profile_overview(s)
+        # رغم أن Coming soon in_progress وأحدث، لا يُختار للمتابعة؛ والدرس
+        # المتاح الوحيد مكتمل ⇒ لا درس متاح غير مكتمل ⇒ continue_learning null.
+        check("continue_learning excludes coming-soon in_progress -> null",
+              ov["continue_learning"] is None, ov["continue_learning"])
+        # overall على المتاح فقط: 1 متاح مكتمل / 1 متاح = 100 (Coming soon
+        # لا يدخل البسط ولا المقام).
+        check("overall counts available only (1/1 = 100, coming-soon out)",
+              ov["stats"]["overall_progress_percentage"] == 100.0,
+              ov["stats"]["overall_progress_percentage"])
+
+
+def test_all_available_completed():
+    """كل الدروس المتاحة مكتملة ⇒ continue_learning=null و overall=100
+    (وليس صفرًا)؛ ودرس Coming soon غير مكتمل لا يُخفّض النسبة ولا يُختار."""
+    with seeded_tx() as c:
+        subj = _mk_subject(c, "All Done Subject")
+        topic = _mk_topic(c, subj, "T", 0)
+        a1 = _mk_lesson(c, topic, "A1", 1, with_content=True)
+        a2 = _mk_lesson(c, topic, "A2", 2, with_content=True)
+        # درس Coming soon (منشور بلا بلوك) وغير مكتمل.
+        _mk_lesson(c, topic, "Soon", 3, status="published")
+
+        s = _mk_user(c, "All Done Student", 3, "en")
+        _mk_progress(c, s, a1, "completed")
+        _mk_progress(c, s, a2, "completed")
+
+        ov = service.get_profile_overview(s)
+        check("all available completed -> continue_learning null",
+              ov["continue_learning"] is None, ov["continue_learning"])
+        check("all available completed -> overall = 100 (not 0)",
+              ov["stats"]["overall_progress_percentage"] == 100.0,
+              ov["stats"]["overall_progress_percentage"])
+
+
 def run():
     try:
         _connect().close()
@@ -328,6 +397,8 @@ def run():
     test_unpublished_in_progress_is_skipped()
     test_overall_filters_consistent()
     test_empty_state()
+    test_coming_soon_excluded_with_progress()
+    test_all_available_completed()
 
     passed = sum(1 for ok, _ in _results if ok)
     print(f"\nALL_PASS {passed == len(_results)} ({passed}/{len(_results)})")

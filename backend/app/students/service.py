@@ -126,7 +126,11 @@ def _compute_streak(study_days, today):
 
 
 def _select_continue_lesson_id(connection, student_id):
-    # (أ) آخر درس بدأه ولم يُكمله (الأحدث حسب last_accessed_at).
+    # يُختار درس المتابعة من الدروس "المتاحة" فقط: منشور وله محتوى
+    # (lesson_blocks). الدرس المنشور بلا محتوى ("Coming soon") لا يُختار
+    # إطلاقًا، حتى لو كان له سجلّ تقدّم سابق.
+    #
+    # (أ) آخر درس متاح بدأه ولم يُكمله (الأحدث حسب last_accessed_at).
     row = connection.execute(
         """
         SELECT lp.lesson_id
@@ -135,6 +139,10 @@ def _select_continue_lesson_id(connection, student_id):
           ON l.id = lp.lesson_id AND l.status = 'published'
         WHERE lp.student_id = %s
           AND lp.status = 'in_progress'
+          AND EXISTS (
+              SELECT 1 FROM public.lesson_blocks AS lb
+              WHERE lb.lesson_id = l.id
+          )
         ORDER BY lp.last_accessed_at DESC, lp.lesson_id DESC
         LIMIT 1;
         """,
@@ -143,7 +151,7 @@ def _select_continue_lesson_id(connection, student_id):
     if row is not None:
         return row["lesson_id"]
 
-    # (ب) أول درس منشور لم يُكمله الطالب، بترتيب موضوعي ثابت.
+    # (ب) أول درس متاح لم يُكمله الطالب، بترتيب موضوعي ثابت.
     row = connection.execute(
         """
         SELECT l.id
@@ -151,6 +159,10 @@ def _select_continue_lesson_id(connection, student_id):
         JOIN public.topics AS t ON t.id = l.topic_id
         JOIN public.subjects AS s ON s.id = t.subject_id
         WHERE l.status = 'published'
+          AND EXISTS (
+              SELECT 1 FROM public.lesson_blocks AS lb
+              WHERE lb.lesson_id = l.id
+          )
           AND NOT EXISTS (
               SELECT 1 FROM public.lesson_progress AS lp
               WHERE lp.student_id = %s
@@ -162,7 +174,7 @@ def _select_continue_lesson_id(connection, student_id):
         """,
         (student_id,),
     ).fetchone()
-    # (ج) لا شيء ⇒ أكمل كل الدروس (أو لا دروس منشورة) ⇒ None.
+    # (ج) لا درس متاح غير مكتمل ⇒ None (continue_learning = null).
     return row["id"] if row is not None else None
 
 
@@ -183,6 +195,10 @@ def _build_continue_learning(connection, student_id, language):
                 COUNT(*) OVER (PARTITION BY l.topic_id) AS lessons_count
             FROM public.lessons AS l
             WHERE l.status = 'published'
+              AND EXISTS (
+                  SELECT 1 FROM public.lesson_blocks AS lb
+                  WHERE lb.lesson_id = l.id
+              )
         )
         SELECT
             s.id AS subject_id, s.name_ar AS subject_ar, s.name_en AS subject_en,
@@ -198,6 +214,10 @@ def _build_continue_learning(connection, student_id, language):
                   AND lp2.status = 'completed'
                   AND l2.status = 'published'
                   AND l2.topic_id = l.topic_id
+                  AND EXISTS (
+                      SELECT 1 FROM public.lesson_blocks AS lb
+                      WHERE lb.lesson_id = l2.id
+                  )
             ) AS completed_in_topic
         FROM ranked AS r
         JOIN public.lessons AS l ON l.id = r.lesson_id
@@ -287,11 +307,19 @@ def get_profile_overview(user_id):
                     WHERE lp.student_id = %(sid)s
                       AND lp.status = 'completed'
                       AND l.status = 'published'
+                      AND EXISTS (
+                          SELECT 1 FROM public.lesson_blocks AS lb
+                          WHERE lb.lesson_id = l.id
+                      )
                 ) AS completed_lessons,
                 (
                     SELECT count(*)
-                    FROM public.lessons
-                    WHERE status = 'published'
+                    FROM public.lessons AS l
+                    WHERE l.status = 'published'
+                      AND EXISTS (
+                          SELECT 1 FROM public.lesson_blocks AS lb
+                          WHERE lb.lesson_id = l.id
+                      )
                 ) AS published_lessons,
                 (
                     SELECT count(*)
