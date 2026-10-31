@@ -119,23 +119,23 @@ def _mk_topic(c, subject_id, name_en, order, description=None):
 
 
 def _mk_lesson(c, topic_id, title_en, order, status="published",
-               summary=None, with_content=False):
-    lid = c.execute(
+               summary=None, ready=False):
+    # الإتاحة قرار صريح: is_content_ready. وجود بلوكات لا يجعل الدرس متاحًا.
+    return c.execute(
         "INSERT INTO public.lessons (topic_id, title_ar, title_en, summary, "
-        "display_order, status) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id;",
-        (topic_id, title_en + " AR", title_en, summary, order, status),
+        "display_order, status, is_content_ready) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id;",
+        (topic_id, title_en + " AR", title_en, summary, order, status, ready),
     ).fetchone()["id"]
-    if with_content:
-        _mk_block(c, lid)
-    return lid
 
 
-def _mk_block(c, lesson_id, order=1):
-    # بلوك محتوى نصّي يجعل الدرس "متاحًا للدراسة" (is_available=true).
+def _mk_block(c, lesson_id, order=1, section="overview", block_type="text",
+              title=None, text="content", resource_url=None):
     c.execute(
-        "INSERT INTO public.lesson_blocks (lesson_id, block_type, "
-        "text_content, display_order) VALUES (%s,'text','content',%s);",
-        (lesson_id, order),
+        "INSERT INTO public.lesson_blocks (lesson_id, section, block_type, "
+        "title, text_content, resource_url, display_order) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s);",
+        (lesson_id, section, block_type, title, text, resource_url, order),
     )
 
 
@@ -173,8 +173,8 @@ def test_subjects_published_only_and_counts():
         s1 = _mk_subject(c, "Cardiovascular System", "desc1")
         t1a = _mk_topic(c, s1, "Heart", 1)
         t1b = _mk_topic(c, s1, "Vessels", 2)
-        _mk_lesson(c, t1a, "Chambers", 1, with_content=True)   # متاح
-        _mk_lesson(c, t1a, "Valves", 2, with_content=False)    # Coming soon
+        _mk_lesson(c, t1a, "Chambers", 1, ready=True)   # متاح
+        _mk_lesson(c, t1a, "Valves", 2, ready=False)    # Coming soon
         _mk_lesson(c, t1a, "Draft One", 3, status="draft")     # مُقصى
         _mk_lesson(c, t1b, "Only Draft", 1, status="draft")    # topic بلا منشور
         # مادة بلا أي درس منشور ⇒ يجب ألّا تظهر إطلاقًا.
@@ -209,7 +209,7 @@ def test_subjects_order():
         sa = _mk_subject(c, "Alpha")
         for sid in (sb, sa):
             t = _mk_topic(c, sid, "T", 1)
-            _mk_lesson(c, t, f"L{sid}", 1, with_content=True)
+            _mk_lesson(c, t, f"L{sid}", 1, ready=True)
 
         ids = [s["id"] for s in service.list_published_subjects()]
         check("subjects ordered by id ascending", ids == [sb, sa], ids)
@@ -224,10 +224,10 @@ def test_outline_published_only_and_order():
         t1 = _mk_topic(c, s, "First", 1, "t1desc")
         t_empty = _mk_topic(c, s, "NoPublished", 3)
         # دروس t1 بترتيب معكوس أيضًا.
-        _mk_lesson(c, t1, "B", 2, with_content=True)
-        _mk_lesson(c, t1, "A", 1, with_content=True)
+        _mk_lesson(c, t1, "B", 2, ready=True)
+        _mk_lesson(c, t1, "A", 1, ready=True)
         _mk_lesson(c, t1, "Draft", 3, status="draft")       # مُقصى
-        _mk_lesson(c, t2, "C", 1, with_content=True)
+        _mk_lesson(c, t2, "C", 1, ready=True)
         _mk_lesson(c, t_empty, "Arch", 1, status="archived")  # الموضوع مُقصى
 
         u = _mk_user(c, "Outline Student", "en")
@@ -253,9 +253,9 @@ def test_lesson_status_values():
     with seeded_tx() as (c, _):
         s = _mk_subject(c, "StatusSubj")
         t = _mk_topic(c, s, "T", 1)
-        l1 = _mk_lesson(c, t, "L1", 1, with_content=True)
-        l2 = _mk_lesson(c, t, "L2", 2, with_content=True)
-        l3 = _mk_lesson(c, t, "L3", 3, with_content=True)
+        l1 = _mk_lesson(c, t, "L1", 1, ready=True)
+        l2 = _mk_lesson(c, t, "L2", 2, ready=True)
+        l3 = _mk_lesson(c, t, "L3", 3, ready=True)
 
         u = _mk_user(c, "Status Student", "en")
         _mk_progress(c, u, l2, "in_progress")
@@ -273,9 +273,9 @@ def test_topic_progress_available_only():
     with seeded_tx() as (c, _):
         s = _mk_subject(c, "ProgSubj")
         t = _mk_topic(c, s, "T", 1)
-        p1 = _mk_lesson(c, t, "P1", 1, with_content=True)
-        p2 = _mk_lesson(c, t, "P2", 2, with_content=True)
-        _mk_lesson(c, t, "P3", 3, with_content=True)
+        p1 = _mk_lesson(c, t, "P1", 1, ready=True)
+        p2 = _mk_lesson(c, t, "P2", 2, ready=True)
+        _mk_lesson(c, t, "P3", 3, ready=True)
         p4 = _mk_lesson(c, t, "P4draft", 4, status="draft")
 
         u = _mk_user(c, "Prog Student", "en")
@@ -302,8 +302,8 @@ def test_coming_soon_separation():
     with seeded_tx() as (c, _):
         s = _mk_subject(c, "ComingSoonSubj")
         t = _mk_topic(c, s, "T", 1)
-        ready = _mk_lesson(c, t, "Ready", 1, with_content=True)
-        soon = _mk_lesson(c, t, "Soon", 2, with_content=False)
+        ready = _mk_lesson(c, t, "Ready", 1, ready=True)
+        soon = _mk_lesson(c, t, "Soon", 2, ready=False)
 
         u = _mk_user(c, "CS Student", "en")
         _mk_progress(c, u, ready, "completed")
@@ -335,7 +335,7 @@ def test_titles_always_english():
     with seeded_tx() as (c, _):
         s = _mk_subject(c, "English Subject")
         t = _mk_topic(c, s, "English Topic", 1)
-        _mk_lesson(c, t, "English Lesson", 1, with_content=True)
+        _mk_lesson(c, t, "English Lesson", 1, ready=True)
 
         u = _mk_user(c, "Arabic Pref Student", "ar")
         subjects = service.list_published_subjects()
@@ -353,7 +353,7 @@ def test_isolation_between_students():
     with seeded_tx() as (c, _):
         s = _mk_subject(c, "IsoSubj")
         t = _mk_topic(c, s, "T", 1)
-        l1 = _mk_lesson(c, t, "L1", 1, with_content=True)
+        l1 = _mk_lesson(c, t, "L1", 1, ready=True)
 
         a = _mk_user(c, "Iso A", "en")
         b = _mk_user(c, "Iso B", "en")
@@ -374,7 +374,7 @@ def test_get_is_read_only():
     with seeded_tx() as (c, _):
         s = _mk_subject(c, "ReadOnlySubj")
         t = _mk_topic(c, s, "T", 1)
-        _mk_lesson(c, t, "L1", 1, with_content=True)
+        _mk_lesson(c, t, "L1", 1, ready=True)
         u = _mk_user(c, "ReadOnly Student", "en")
 
         before = c.execute(
@@ -421,7 +421,7 @@ def test_no_n_plus_one():
         s = _mk_subject(c, "ManySubj")
         t = _mk_topic(c, s, "T", 1)
         for i in range(1, 26):  # 25 درسًا منشورًا، بعضها بمحتوى
-            _mk_lesson(c, t, f"L{i}", i, with_content=(i % 2 == 0))
+            _mk_lesson(c, t, f"L{i}", i, ready=(i % 2 == 0))
         u = _mk_user(c, "NPlus Student", "en")
 
         counting.query_count = 0
@@ -448,6 +448,7 @@ def test_auth_and_routes_unchanged():
         "/auth/login", "/auth/me", "/auth/logout", "/auth/signup",
         "/students/me", "/students/me/profile-overview",
         "/learning/subjects", "/learning/subjects/{subject_id}/outline",
+        "/learning/lessons/{lesson_id}",
     }
     missing = expected - paths
     check("all expected routes present (old + new)", not missing, missing)
@@ -459,6 +460,293 @@ def test_auth_and_routes_unchanged():
     except HTTPException as exc:
         raised = exc.status_code == 403
     check("non-student session -> 403 (reused guard)", raised)
+
+
+def test_overview_blocks_dont_make_available():
+    """(18) بلوكات Overview تجعل الدرس can_open=true لكن ليس is_available؛
+    الجاهزية قرار صريح منفصل، ولا تُحتسب ضمن المتاح."""
+    with seeded_tx() as (c, _):
+        s = _mk_subject(c, "OOSubj")
+        t = _mk_topic(c, s, "T", 1)
+        lid = _mk_lesson(c, t, "OnlyOverview", 1, ready=False)
+        _mk_block(c, lid, 1, section="overview", title="x", text="y")
+        u = _mk_user(c, "OO Student", "en")
+
+        out = service.get_subject_outline(s, u)
+        lesson = out["topics"][0]["lessons"][0]
+        check("lesson with content -> can_open true",
+              lesson["can_open"] is True, lesson["can_open"])
+        check("lesson not ready -> is_available false",
+              lesson["is_available"] is False)
+        check("not counted as available in topic",
+              out["topics"][0]["available_lessons_count"] == 0,
+              out["topics"][0]["available_lessons_count"])
+        subs = service.list_published_subjects()
+        check("subjects available_lessons_count excludes not-ready w/ blocks",
+              subs[0]["available_lessons_count"] == 0,
+              subs[0]["available_lessons_count"])
+
+
+def test_can_open_false_without_content():
+    """(18ب) درس منشور بلا محتوى ⇒ can_open=false (Coming soon)."""
+    with seeded_tx() as (c, _):
+        s = _mk_subject(c, "NoContentSubj")
+        t = _mk_topic(c, s, "T", 1)
+        _mk_lesson(c, t, "Empty", 1, ready=False)  # لا بلوكات
+        u = _mk_user(c, "NC Student", "en")
+        out = service.get_subject_outline(s, u)
+        lesson = out["topics"][0]["lessons"][0]
+        check("no content -> can_open false, is_available false",
+              lesson["can_open"] is False and lesson["is_available"] is False,
+              (lesson["can_open"], lesson["is_available"]))
+
+
+def test_lesson_detail_available():
+    """(19) جلب درس متاح: أقسام مرتبة، بلوكات مرتبة، عنوان إنجليزي، حالة الطالب."""
+    with seeded_tx() as (c, _):
+        s = _mk_subject(c, "S")
+        t = _mk_topic(c, s, "T", 1)
+        lid = _mk_lesson(c, t, "Heart Chambers", 1, ready=True, summary="sum")
+        _mk_block(c, lid, order=1, section="overview", title="Heart Chambers",
+                  text="intro")
+        _mk_block(c, lid, order=2, section="overview",
+                  title="Learning objectives", text="a\nb\nc")
+        u = _mk_user(c, "LD Student", "ar")  # ar: العنوان يبقى إنجليزيًا
+        _mk_progress(c, u, lid, "in_progress")
+
+        d = service.get_lesson_detail(lid, u)
+        check("title English + summary + can_open + is_available true",
+              d["title"] == "Heart Chambers" and d["description"] == "sum"
+              and d["can_open"] is True and d["is_available"] is True,
+              d["title"])
+        check("status reflects progress (in_progress)",
+              d["status"] == "in_progress")
+        check("one overview section with 2 ordered blocks",
+              len(d["sections"]) == 1 and d["sections"][0]["key"] == "overview"
+              and [b["display_order"] for b in d["sections"][0]["blocks"]]
+              == [1, 2], d["sections"])
+        b0 = d["sections"][0]["blocks"][0]
+        check("block carries title+text, no fake resource_url",
+              b0["title"] == "Heart Chambers" and b0["text"] == "intro"
+              and b0["resource_url"] is None, b0)
+
+
+def test_lesson_detail_openable_not_ready():
+    """(20) درس منشور له محتوى لكنه غير جاهز: يُفتح 200 (can_open=true,
+    is_available=false). المنشور بلا محتوى والمسوّدة يُعادان 404."""
+    from fastapi import HTTPException
+
+    with seeded_tx() as (c, _):
+        s = _mk_subject(c, "S")
+        t = _mk_topic(c, s, "T", 1)
+        # منشور، له Overview، غير جاهز ⇒ قابل للفتح الآن (محتوى تدريجي).
+        openable = _mk_lesson(c, t, "Partial", 1, ready=False)
+        _mk_block(c, openable, 1, section="overview", title="Partial",
+                  text="intro")
+        u = _mk_user(c, "ONR Student", "en")
+
+        d = service.get_lesson_detail(openable, u)
+        check("openable not-ready lesson returns 200 with overview",
+              d["can_open"] is True and d["is_available"] is False
+              and d["sections"][0]["key"] == "overview",
+              (d["can_open"], d["is_available"]))
+
+        # منشور بلا محتوى ⇒ غير قابل للفتح ⇒ 404.
+        empty = _mk_lesson(c, t, "Empty", 2, ready=False)
+        raised = False
+        try:
+            service.get_lesson_detail(empty, u)
+        except HTTPException as exc:
+            raised = exc.status_code == 404
+        check("published lesson with no content -> 404", raised)
+
+        # غير منشور ⇒ 404 حتى لو له محتوى.
+        draft = _mk_lesson(c, t, "Draft", 3, status="draft")
+        _mk_block(c, draft, 1, section="overview", text="x")
+        raised2 = False
+        try:
+            service.get_lesson_detail(draft, u)
+        except HTTPException as exc:
+            raised2 = exc.status_code == 404
+        check("unpublished lesson -> 404 (even with content)", raised2)
+
+
+def test_lesson_detail_read_only():
+    """(21) جلب الدرس لا يكتب أي صف تقدّم."""
+    with seeded_tx() as (c, _):
+        s = _mk_subject(c, "S")
+        t = _mk_topic(c, s, "T", 1)
+        lid = _mk_lesson(c, t, "L", 1, ready=True)
+        _mk_block(c, lid, 1)
+        u = _mk_user(c, "LDRO Student", "en")
+
+        before = c.execute("SELECT count(*) n FROM public.lesson_progress "
+                           "WHERE student_id=%s;", (u,)).fetchone()["n"]
+        service.get_lesson_detail(lid, u)
+        after = c.execute("SELECT count(*) n FROM public.lesson_progress "
+                          "WHERE student_id=%s;", (u,)).fetchone()["n"]
+        check("lesson detail GET creates no progress rows",
+              before == 0 and after == 0, (before, after))
+
+
+def test_overview_seed_idempotent():
+    """(22) سكربت Overview: يدرج بالترتيب، لا يكرّر، ويجعل الدرس قابلًا للفتح
+    دون أن يجعله متاحًا للدراسة (is_available يبقى false)."""
+    from contextlib import contextmanager
+
+    import scripts.seed_lesson_overview as seed_mod
+
+    with seeded_tx() as (c, _):
+        s = _mk_subject(c, "Cardiovascular System")
+        t = _mk_topic(c, s, "Heart Structure & Blood Flow", 1)
+        lid = _mk_lesson(c, t, "Heart Chambers", 1, ready=False)
+        u = _mk_user(c, "Seed Student", "en")
+
+        @contextmanager
+        def _shared():
+            yield c
+
+        orig = seed_mod.get_connection
+        seed_mod.get_connection = _shared
+        try:
+            seed_mod.seed_overview()
+            n1 = c.execute("SELECT count(*) n FROM public.lesson_blocks "
+                           "WHERE lesson_id=%s AND section='overview';",
+                           (lid,)).fetchone()["n"]
+            seed_mod.seed_overview()  # إعادة تشغيل
+            n2 = c.execute("SELECT count(*) n FROM public.lesson_blocks "
+                           "WHERE lesson_id=%s AND section='overview';",
+                           (lid,)).fetchone()["n"]
+        finally:
+            seed_mod.get_connection = orig
+
+        check("overview seed inserts 2 blocks", n1 == 2, n1)
+        check("re-run does not duplicate (still 2)", n2 == 2, n2)
+        rows = c.execute(
+            "SELECT display_order, title, text_content FROM public.lesson_blocks"
+            " WHERE lesson_id=%s AND section='overview' ORDER BY display_order;",
+            (lid,)).fetchall()
+        check("ordered: intro(1) then objectives(2), 3 objective lines",
+              [r["display_order"] for r in rows] == [1, 2]
+              and rows[0]["title"] == "Heart Chambers"
+              and rows[1]["title"] == "Learning objectives"
+              and rows[1]["text_content"].count("\n") == 2, rows)
+
+        # بعد إدخال Overview: الدرس قابل للفتح (can_open) لكنه يبقى غير جاهز
+        # (is_available=false) ولا يُقترح للمتابعة.
+        d = service.get_lesson_detail(lid, u)
+        check("after overview seed: openable (200) but not yet available",
+              d["can_open"] is True and d["is_available"] is False,
+              (d["can_open"], d["is_available"]))
+
+
+def test_core_anatomy_content():
+    """(23) Core Anatomy: قسمان مرتّبان، 4 حجرات بمفاتيح ثابتة، segments تطابق
+    النص وتشير لمصطلحات صحيحة، مقارنة + Think→Reveal + مصادر + مسرد، والدرس
+    يبقى قابلًا للفتح وغير جاهز. idempotent بلا تكرار."""
+    from contextlib import contextmanager
+
+    import scripts.seed_lesson_overview as ov_mod
+    import scripts.seed_lesson_core_anatomy as ca_mod
+
+    with seeded_tx() as (c, _):
+        s = _mk_subject(c, "Cardiovascular System")
+        t = _mk_topic(c, s, "Heart Structure & Blood Flow", 1)
+        lid = _mk_lesson(c, t, "Heart Chambers", 1, ready=False)
+        u = _mk_user(c, "CA Student", "en")
+
+        @contextmanager
+        def _shared():
+            yield c
+
+        ov_orig, ca_orig = ov_mod.get_connection, ca_mod.get_connection
+        ov_mod.get_connection = _shared
+        ca_mod.get_connection = _shared
+        try:
+            ov_mod.seed_overview()
+            ca_mod.seed_core_anatomy()
+            n1 = c.execute("SELECT count(*) n FROM public.lesson_blocks "
+                           "WHERE lesson_id=%s AND section='core_anatomy';",
+                           (lid,)).fetchone()["n"]
+            ca_mod.seed_core_anatomy()  # إعادة تشغيل بلا FORCE
+            n2 = c.execute("SELECT count(*) n FROM public.lesson_blocks "
+                           "WHERE lesson_id=%s AND section='core_anatomy';",
+                           (lid,)).fetchone()["n"]
+        finally:
+            ov_mod.get_connection = ov_orig
+            ca_mod.get_connection = ca_orig
+
+        check("re-seed does not duplicate core_anatomy", n1 == n2 == 8,
+              (n1, n2))
+
+        d = service.get_lesson_detail(lid, u)
+        check("lesson still openable but not ready",
+              d["can_open"] is True and d["is_available"] is False)
+
+        keys = [sec["key"] for sec in d["sections"]]
+        check("two sections in order: overview then core_anatomy",
+              keys == ["overview", "core_anatomy"], keys)
+
+        core = [sec for sec in d["sections"] if sec["key"] == "core_anatomy"][0]
+        ctypes = [b["content_type"] for b in core["blocks"]]
+        check("core block order (glossary lifted out)",
+              ctypes == ["intro", "chamber", "chamber", "chamber", "chamber",
+                         "comparison", "think_reveal"], ctypes)
+
+        chambers = [b for b in core["blocks"] if b["content_type"] == "chamber"]
+        bkeys = [b["block_key"] for b in chambers]
+        skeys = [b["structure_key"] for b in chambers]
+        check("four chambers with distinct stable block_keys",
+              bkeys == ["core_right_atrium", "core_right_ventricle",
+                        "core_left_atrium", "core_left_ventricle"], bkeys)
+        check("distinct structure_keys for 3D linkage later",
+              skeys == ["right_atrium", "right_ventricle", "left_atrium",
+                        "left_ventricle"], skeys)
+        check("chambers carry abbreviation + key_point",
+              all(ch["abbreviation"] and ch["key_point"] for ch in chambers))
+
+        term_ids = {term["id"] for term in d["terms"]}
+        for b in core["blocks"]:
+            if b["segments"] is None:
+                continue
+            joined = "".join(seg["text"] for seg in b["segments"])
+            check(f"segments join == text ({b['block_key']})",
+                  joined == b["text"], (b["block_key"]))
+            for seg in b["segments"]:
+                if seg.get("term_id"):
+                    check(f"term_id '{seg['term_id']}' is defined",
+                          seg["term_id"] in term_ids, seg["term_id"])
+
+        comp = [b for b in core["blocks"]
+                if b["content_type"] == "comparison"][0]
+        check("comparison has 3 columns and 4 rows (structured, not text)",
+              comp["comparison"]["columns"]
+              == ["Chamber", "Receives blood from", "Sends blood to"]
+              and len(comp["comparison"]["rows"]) == 4,
+              comp["comparison"])
+
+        tr = [b for b in core["blocks"]
+              if b["content_type"] == "think_reveal"][0]
+        check("think_reveal has prompt + explanation (no scoring)",
+              tr["think_reveal"]["prompt"].startswith("Why is the wall")
+              and "higher pressure" in tr["think_reveal"]["explanation"])
+
+        check("glossary returned at lesson level with 8 terms",
+              len(d["terms"]) == 8, len(d["terms"]))
+        atrium = [x for x in d["terms"] if x["id"] == "atrium"][0]
+        check("term 'atrium' has plural 'atria'",
+              atrium["plural"] == "atria", atrium)
+
+        check("three sources returned with urls",
+              len(d["sources"]) == 3
+              and all(src["url"].startswith("http") for src in d["sources"]),
+              d["sources"])
+
+        # Overview لم ينكسر: ما زال أول قسم ببلوكيه.
+        ov = [sec for sec in d["sections"] if sec["key"] == "overview"][0]
+        check("overview intact (2 blocks, keyed)",
+              len(ov["blocks"]) == 2
+              and ov["blocks"][0]["block_key"] == "overview_intro", ov)
 
 
 def run():
@@ -480,6 +768,13 @@ def run():
     test_get_is_read_only()
     test_subject_404()
     test_no_n_plus_one()
+    test_overview_blocks_dont_make_available()
+    test_can_open_false_without_content()
+    test_lesson_detail_available()
+    test_lesson_detail_openable_not_ready()
+    test_lesson_detail_read_only()
+    test_overview_seed_idempotent()
+    test_core_anatomy_content()
     test_auth_and_routes_unchanged()
 
     passed = sum(1 for ok, _ in _results if ok)
