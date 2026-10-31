@@ -640,6 +640,115 @@ def test_overview_seed_idempotent():
               (d["can_open"], d["is_available"]))
 
 
+def test_core_anatomy_content():
+    """(23) Core Anatomy: قسمان مرتّبان، 4 حجرات بمفاتيح ثابتة، segments تطابق
+    النص وتشير لمصطلحات صحيحة، مقارنة + Think→Reveal + مصادر + مسرد، والدرس
+    يبقى قابلًا للفتح وغير جاهز. idempotent بلا تكرار."""
+    from contextlib import contextmanager
+
+    import scripts.seed_lesson_overview as ov_mod
+    import scripts.seed_lesson_core_anatomy as ca_mod
+
+    with seeded_tx() as (c, _):
+        s = _mk_subject(c, "Cardiovascular System")
+        t = _mk_topic(c, s, "Heart Structure & Blood Flow", 1)
+        lid = _mk_lesson(c, t, "Heart Chambers", 1, ready=False)
+        u = _mk_user(c, "CA Student", "en")
+
+        @contextmanager
+        def _shared():
+            yield c
+
+        ov_orig, ca_orig = ov_mod.get_connection, ca_mod.get_connection
+        ov_mod.get_connection = _shared
+        ca_mod.get_connection = _shared
+        try:
+            ov_mod.seed_overview()
+            ca_mod.seed_core_anatomy()
+            n1 = c.execute("SELECT count(*) n FROM public.lesson_blocks "
+                           "WHERE lesson_id=%s AND section='core_anatomy';",
+                           (lid,)).fetchone()["n"]
+            ca_mod.seed_core_anatomy()  # إعادة تشغيل بلا FORCE
+            n2 = c.execute("SELECT count(*) n FROM public.lesson_blocks "
+                           "WHERE lesson_id=%s AND section='core_anatomy';",
+                           (lid,)).fetchone()["n"]
+        finally:
+            ov_mod.get_connection = ov_orig
+            ca_mod.get_connection = ca_orig
+
+        check("re-seed does not duplicate core_anatomy", n1 == n2 == 8,
+              (n1, n2))
+
+        d = service.get_lesson_detail(lid, u)
+        check("lesson still openable but not ready",
+              d["can_open"] is True and d["is_available"] is False)
+
+        keys = [sec["key"] for sec in d["sections"]]
+        check("two sections in order: overview then core_anatomy",
+              keys == ["overview", "core_anatomy"], keys)
+
+        core = [sec for sec in d["sections"] if sec["key"] == "core_anatomy"][0]
+        ctypes = [b["content_type"] for b in core["blocks"]]
+        check("core block order (glossary lifted out)",
+              ctypes == ["intro", "chamber", "chamber", "chamber", "chamber",
+                         "comparison", "think_reveal"], ctypes)
+
+        chambers = [b for b in core["blocks"] if b["content_type"] == "chamber"]
+        bkeys = [b["block_key"] for b in chambers]
+        skeys = [b["structure_key"] for b in chambers]
+        check("four chambers with distinct stable block_keys",
+              bkeys == ["core_right_atrium", "core_right_ventricle",
+                        "core_left_atrium", "core_left_ventricle"], bkeys)
+        check("distinct structure_keys for 3D linkage later",
+              skeys == ["right_atrium", "right_ventricle", "left_atrium",
+                        "left_ventricle"], skeys)
+        check("chambers carry abbreviation + key_point",
+              all(ch["abbreviation"] and ch["key_point"] for ch in chambers))
+
+        term_ids = {term["id"] for term in d["terms"]}
+        for b in core["blocks"]:
+            if b["segments"] is None:
+                continue
+            joined = "".join(seg["text"] for seg in b["segments"])
+            check(f"segments join == text ({b['block_key']})",
+                  joined == b["text"], (b["block_key"]))
+            for seg in b["segments"]:
+                if seg.get("term_id"):
+                    check(f"term_id '{seg['term_id']}' is defined",
+                          seg["term_id"] in term_ids, seg["term_id"])
+
+        comp = [b for b in core["blocks"]
+                if b["content_type"] == "comparison"][0]
+        check("comparison has 3 columns and 4 rows (structured, not text)",
+              comp["comparison"]["columns"]
+              == ["Chamber", "Receives blood from", "Sends blood to"]
+              and len(comp["comparison"]["rows"]) == 4,
+              comp["comparison"])
+
+        tr = [b for b in core["blocks"]
+              if b["content_type"] == "think_reveal"][0]
+        check("think_reveal has prompt + explanation (no scoring)",
+              tr["think_reveal"]["prompt"].startswith("Why is the wall")
+              and "higher pressure" in tr["think_reveal"]["explanation"])
+
+        check("glossary returned at lesson level with 8 terms",
+              len(d["terms"]) == 8, len(d["terms"]))
+        atrium = [x for x in d["terms"] if x["id"] == "atrium"][0]
+        check("term 'atrium' has plural 'atria'",
+              atrium["plural"] == "atria", atrium)
+
+        check("three sources returned with urls",
+              len(d["sources"]) == 3
+              and all(src["url"].startswith("http") for src in d["sources"]),
+              d["sources"])
+
+        # Overview لم ينكسر: ما زال أول قسم ببلوكيه.
+        ov = [sec for sec in d["sections"] if sec["key"] == "overview"][0]
+        check("overview intact (2 blocks, keyed)",
+              len(ov["blocks"]) == 2
+              and ov["blocks"][0]["block_key"] == "overview_intro", ov)
+
+
 def run():
     try:
         _connect().close()
@@ -665,6 +774,7 @@ def run():
     test_lesson_detail_openable_not_ready()
     test_lesson_detail_read_only()
     test_overview_seed_idempotent()
+    test_core_anatomy_content()
     test_auth_and_routes_unchanged()
 
     passed = sum(1 for ok, _ in _results if ok)

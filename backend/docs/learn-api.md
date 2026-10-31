@@ -226,6 +226,161 @@ Authorization: Bearer <access_token>
 
 ---
 
+## قسم Core Anatomy — نموذج المحتوى المنظّم
+
+لكل بلوك حقلان للتمييز: **`content_type`** (نوع العرض) و**`block_key`** (مفتاح
+ثابت). رتّبي الأقسام والبلوكات بـ`display_order` (لا ترتيب أبجدي). أنواع
+`content_type` الحالية: `text` (Overview)، `intro`، `chamber`، `comparison`،
+`think_reveal`. (البلوك `glossary` لا يظهر داخل الأقسام؛ يُعاد في `terms` على
+مستوى الدرس.)
+
+### بطاقات الحجرات (`content_type: "chamber"`)
+اعرضي كل حجرة **بطاقة مستقلّة متتابعة** (لا تجمعيها في نصّ واحد). الحقول:
+- `title` (مثل "Right Atrium")، `abbreviation` (RA/RV/LA/LV).
+- `text` النص الكامل، و`segments` نفس النص مقسّمًا (انظري المصطلحات أدناه).
+- `key_point` نقطة مفتاحية تُبرز أسفل البطاقة.
+- `structure_key` (`right_atrium`…): معرّف تعليمي لربط 3D لاحقًا، **ليس اسم
+  mesh** — لا تبني عليه عرضًا ثلاثي الأبعاد الآن.
+
+### المصطلحات القابلة للضغط (`segments` + `terms`)
+- كل بلوك نصّي يحمل `segments`: قائمة `{ "text": "...", "term_id": "..."|null }`.
+  **تجميع `text` لكل الأجزاء بالترتيب = النص الكامل** للبلوك (تحقّقنا منه).
+- اعرضي النص من `segments`: الجزء الذي له `term_id` اجعليه قابلًا للضغط،
+  وعند الضغط اعرضي تعريف المصطلح من `terms` (بالبحث عن `id == term_id`).
+  **لا تعتمدي على بحث/استبدال الكلمات في النص** — استخدمي `segments` فقط.
+- `terms` على مستوى الدرس: `{ "id", "definition", "plural"|null }`. مخزّنة مرة
+  واحدة وتُعاد مع الدرس (لا API منفصل للمصطلحات).
+
+### جدول المقارنة (`content_type: "comparison"`)
+`comparison`: `{ "columns": [...3], "rows": [[...3], ...] }` — **بيانات منظّمة**،
+ابنيه كجدول من `columns`/`rows` (ليس نصًّا جاهزًا). (`text` مجرّد عنوان بديل.)
+
+### نشاط Think → Reveal (`content_type: "think_reveal"`)
+`think_reveal`: `{ "prompt", "explanation" }`. اعرضي `prompt`، وزرّ "Reveal"
+يُظهر `explanation`. **هذا ليس امتحانًا:** لا تسجيل محاولة، لا تصحيح، ولا
+تُعلِّمي الدرس مكتملًا عند الكشف.
+
+### المصادر (`sources`)
+`sources` على مستوى الدرس: `{ "title", "url" }`. اعرضيها كمراجع. (ملخّصة
+بصياغتنا، وليست مراجعة طبيًا.)
+
+### مثال JSON كامل — Heart Chambers بعد إضافة Core Anatomy
+```json
+{
+  "id": 13,
+  "title": "Heart Chambers",
+  "description": "Identify the four chambers and understand their basic roles.",
+  "can_open": true,
+  "is_available": false,
+  "status": "not_started",
+  "sections": [
+    {
+      "key": "overview",
+      "display_order": 1,
+      "blocks": [
+        { "content_type": "text", "block_key": "overview_intro", "display_order": 1,
+          "title": "Heart Chambers",
+          "text": "Explore the four chambers of the heart and how they work together.",
+          "segments": null },
+        { "content_type": "text", "block_key": "overview_objectives", "display_order": 2,
+          "title": "Learning objectives",
+          "text": "Name the four chambers of the heart.\nLocate each chamber on a labelled diagram and a 3D model.\nDistinguish the roles of the atria and ventricles.",
+          "segments": null }
+      ]
+    },
+    {
+      "key": "core_anatomy",
+      "display_order": 3,
+      "blocks": [
+        { "content_type": "intro", "block_key": "core_intro", "display_order": 3,
+          "title": "Four chambers, two sides",
+          "text": "The heart has two atria and two ventricles. ...",
+          "segments": [
+            { "text": "The heart has two ", "term_id": null },
+            { "text": "atria", "term_id": "atrium" },
+            { "text": " and two ", "term_id": null },
+            { "text": "ventricles", "term_id": "ventricle" },
+            { "text": ". The atria receive blood ... supplies the ", "term_id": null },
+            { "text": "systemic circulation", "term_id": "systemic_circulation" },
+            { "text": ".", "term_id": null }
+          ] },
+        { "content_type": "chamber", "block_key": "core_right_atrium", "display_order": 4,
+          "title": "Right Atrium", "abbreviation": "RA", "structure_key": "right_atrium",
+          "text": "The right atrium receives oxygen-poor blood through the superior and inferior venae cavae. ...",
+          "segments": [
+            { "text": "The right atrium ... superior and inferior ", "term_id": null },
+            { "text": "venae cavae", "term_id": "vena_cava" },
+            { "text": ". It also receives ... through the ", "term_id": null },
+            { "text": "coronary sinus", "term_id": "coronary_sinus" },
+            { "text": ". Blood passes ... into the right ventricle.", "term_id": null }
+          ],
+          "key_point": "The right atrium receives returning blood; it does not pump directly to the lungs." },
+        { "content_type": "chamber", "block_key": "core_right_ventricle", "display_order": 5,
+          "title": "Right Ventricle", "abbreviation": "RV", "structure_key": "right_ventricle",
+          "text": "The right ventricle receives blood from the right atrium. ...",
+          "segments": [ { "text": "The right ventricle ... leading to the lungs.", "term_id": null } ],
+          "key_point": "The right ventricle supplies the pulmonary circulation." },
+        { "content_type": "chamber", "block_key": "core_left_atrium", "display_order": 6,
+          "title": "Left Atrium", "abbreviation": "LA", "structure_key": "left_atrium",
+          "text": "The left atrium receives oxygen-rich blood returning from the lungs through the pulmonary veins. ...",
+          "segments": [
+            { "text": "The left atrium ... through the ", "term_id": null },
+            { "text": "pulmonary veins", "term_id": "pulmonary_veins" },
+            { "text": ". Blood then passes ... into the left ventricle.", "term_id": null }
+          ],
+          "key_point": "Pulmonary veins carry oxygen-rich blood toward the heart." },
+        { "content_type": "chamber", "block_key": "core_left_ventricle", "display_order": 7,
+          "title": "Left Ventricle", "abbreviation": "LV", "structure_key": "left_ventricle",
+          "text": "The left ventricle receives blood from the left atrium and pumps it through the aortic valve into the aorta. ...",
+          "segments": [
+            { "text": "The left ventricle ... into the ", "term_id": null },
+            { "text": "aorta", "term_id": "aorta" },
+            { "text": ". Its muscular wall ... needed for ", "term_id": null },
+            { "text": "systemic circulation", "term_id": "systemic_circulation" },
+            { "text": ".", "term_id": null }
+          ],
+          "key_point": "The left ventricle supplies the systemic circulation." },
+        { "content_type": "comparison", "block_key": "core_comparison", "display_order": 8,
+          "title": "Chamber comparison", "text": "Comparison of the four heart chambers.",
+          "comparison": {
+            "columns": ["Chamber", "Receives blood from", "Sends blood to"],
+            "rows": [
+              ["Right atrium", "Venae cavae and coronary sinus", "Right ventricle"],
+              ["Right ventricle", "Right atrium", "Pulmonary trunk → lungs"],
+              ["Left atrium", "Pulmonary veins", "Left ventricle"],
+              ["Left ventricle", "Left atrium", "Aorta → systemic circulation"]
+            ] } },
+        { "content_type": "think_reveal", "block_key": "core_recall", "display_order": 9,
+          "title": "Recall",
+          "text": "Why is the wall of the left ventricle thicker than that of the right ventricle?",
+          "think_reveal": {
+            "prompt": "Why is the wall of the left ventricle thicker than that of the right ventricle?",
+            "explanation": "The left ventricle generates higher pressure to drive blood through systemic circulation. The right ventricle pumps through the lower-pressure pulmonary circulation." } }
+      ]
+    }
+  ],
+  "terms": [
+    { "id": "atrium", "definition": "A heart chamber that receives returning blood.", "plural": "atria" },
+    { "id": "ventricle", "definition": "A heart chamber that pumps blood into an artery.", "plural": null },
+    { "id": "pulmonary_circulation", "definition": "Blood flow from the right ventricle through the lungs and back to the left atrium.", "plural": null },
+    { "id": "systemic_circulation", "definition": "Blood flow from the left ventricle through the body's tissues and back to the right atrium.", "plural": null },
+    { "id": "vena_cava", "definition": "One of the two large veins returning systemic venous blood to the right atrium.", "plural": "venae cavae" },
+    { "id": "coronary_sinus", "definition": "A venous channel that collects much of the blood returning from the heart muscle and drains into the right atrium.", "plural": null },
+    { "id": "pulmonary_veins", "definition": "Veins that return oxygen-rich blood from the lungs to the left atrium.", "plural": null },
+    { "id": "aorta", "definition": "The main artery carrying blood from the left ventricle into the systemic circulation.", "plural": null }
+  ],
+  "sources": [
+    { "title": "NIH / NHLBI — What the Heart Looks Like", "url": "https://www.nhlbi.nih.gov/health/heart/anatomy" },
+    { "title": "NCI / SEER — Structure of the Heart", "url": "https://www.training.seer.cancer.gov/anatomy/cardiovascular/heart/structure.html" },
+    { "title": "StatPearls — Anatomy, Thorax, Heart", "url": "https://www.ncbi.nlm.nih.gov/books/NBK470256/" }
+  ]
+}
+```
+> في المثال كل بلوكات الدرس بـ`block_type: "text"` (قيد المخطط)؛ **اعتمدي
+> `content_type`** لتحديد طريقة العرض، و`block_key` كمعرّف ثابت.
+
+---
+
 ## الحقول التي تكون null حاليًا
 - `thumbnail_url` (للمادة وللدرس): غير مخزَّن في المخطط ⇒ **null دائمًا**.
   استخدمي صورة/أيقونة بديلة.
@@ -265,7 +420,15 @@ Authorization: Bearer <access_token>
 | `lesson.status` | String (`not_started`/`in_progress`/`completed`) | لا |
 | `lesson.sections[].key` / `display_order` | String / int | لا |
 | `sections[].blocks[].block_type` | String (`text`/`image`/`video`/`model_3d`) | لا |
+| `sections[].blocks[].content_type` | String (`text`/`intro`/`chamber`/`comparison`/`think_reveal`) | لا |
+| `sections[].blocks[].block_key` | String? | نعم (قديمة) |
 | `sections[].blocks[].title` / `text` / `resource_url` / `alternative_text` | String? | نعم |
+| `sections[].blocks[].segments[]` | `{text:String, term_id:String?}` list أو null | نعم |
+| `sections[].blocks[].structure_key` / `abbreviation` / `key_point` | String? | نعم (للـchamber) |
+| `sections[].blocks[].comparison` | `{columns:List<String>, rows:List<List<String>>}`? | نعم (للـcomparison) |
+| `sections[].blocks[].think_reveal` | `{prompt:String, explanation:String}`? | نعم (للـthink_reveal) |
+| `lesson.terms[]` | `{id:String, definition:String, plural:String?}` list | لا (قد تكون []) |
+| `lesson.sources[]` | `{title:String, url:String?}` list | لا (قد تكون []) |
 
 ## قيود/افتراضات (مستوى النشر)
 - لا عمود `status` للمواد/المواضيع؛ النشر على مستوى الدرس فقط
@@ -291,26 +454,34 @@ Coming soon **لا تُختار** في `continue_learning`، ولا تُحتسب
 `overall_progress_percentage` ولا في تقدّم الوحدة داخل بطاقة المتابعة. فإن لم
 يوجد درس متاح غير مكتمل ⇒ `continue_learning = null` والتقدّم صفر.
 
-## Migration
-هذا التسليم يضيف عمودين (migration `sql/003_lesson_content_ready_and_sections.sql`):
-`lessons.is_content_ready` (BOOLEAN، افتراضيًا FALSE) و`lesson_blocks.section`
-(VARCHAR). قابل لإعادة التشغيل (`IF NOT EXISTS`). طُبِّق على قاعدتي التطوير
-والاختبار. تشغيله يدويًا: `psql -d "<db>" -f sql/003_lesson_content_ready_and_sections.sql`.
+## Migrations
+- `sql/003_lesson_content_ready_and_sections.sql`: `lessons.is_content_ready`
+  (BOOLEAN، FALSE) و`lesson_blocks.section` (VARCHAR).
+- `sql/004_lesson_blocks_structured.sql`: `lesson_blocks.block_key`،
+  `content_type`، `data` (JSONB)، وفهرس فريد جزئي `(lesson_id, block_key)`.
+
+كلاهما idempotent (`IF NOT EXISTS`) ولا يغيّر قيود block_type/المحتوى. طُبِّقا
+على قاعدتي التطوير والاختبار. يدويًا: `psql -d "<db>" -f sql/00X_*.sql`.
 
 ## تجربة من Swagger (بحسابك)
 1. شغّلي الباك: `.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8001`
-2. (مرة واحدة) ازرعي المحتوى: `.\.venv\Scripts\python.exe scripts\seed_learn_content.py`
-   ثم محتوى Overview: `.\.venv\Scripts\python.exe scripts\seed_lesson_overview.py`
+2. (مرة واحدة) ازرعي المحتوى:
+   `.\.venv\Scripts\python.exe scripts\seed_learn_content.py`
+   ثم Overview: `.\.venv\Scripts\python.exe scripts\seed_lesson_overview.py`
+   ثم Core Anatomy: `.\.venv\Scripts\python.exe scripts\seed_lesson_core_anatomy.py`
+   (لتحديث Core Anatomy لاحقًا: `$env:FORCE="1"` قبل تشغيله — يستبدل هذا
+   القسم فقط دون المساس بغيره.)
 3. افتحي `http://127.0.0.1:8001/docs`.
 4. `POST /auth/login` ببريد وكلمة مرور طالب ⇒ انسخي `access_token`.
 5. اضغطي **Authorize** وألصقي التوكن (بدون كلمة `Bearer`؛ Swagger يضيفها).
 6. نفّذي `GET /learning/subjects`، خذي `id` المادة من الاستجابة (**لا تفترضي
    `1`**)، ثم `GET /learning/subjects/{id}/outline`.
-7. `GET /learning/lessons/13` (Heart Chambers) تُعيد **200** مع قسم Overview
-   (`can_open=true`, `is_available=false`). بينما `GET /learning/lessons/14`
-   تُعيد **404** (لا محتوى بعد، `can_open=false`).
+7. `GET /learning/lessons/13` (Heart Chambers) تُعيد **200** مع قسمَي
+   `overview` ثم `core_anatomy` (`can_open=true`, `is_available=false`).
+   بينما `GET /learning/lessons/14` تُعيد **404** (`can_open=false`).
 
 > المعرّفات الفعلية في قاعدة التطوير: المادة `id=3`، الوحدة `id=3`، الدروس
-> `13, 14, 15`. **Heart Chambers (`id=13`)**: `can_open=true` (له Overview)،
-> `is_available=false` (غير جاهز بعد). الدرسان `14, 15`: `can_open=false`
-> ("Coming soon"). لا درس `is_available=true` بعد ⇒ `available_lessons_count=0`.
+> `13, 14, 15`. **Heart Chambers (`id=13`)**: `can_open=true`، قسمان
+> (`overview`, `core_anatomy`)، `is_available=false` (غير جاهز بعد). الدرسان
+> `14, 15`: `can_open=false`. لا درس `is_available=true` ⇒
+> `available_lessons_count=0`، و`continue_learning=null`.

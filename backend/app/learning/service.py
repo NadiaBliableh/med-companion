@@ -206,10 +206,13 @@ def get_lesson_detail(lesson_id, student_id):
                 COALESCE(section, 'general') AS section,
                 display_order,
                 block_type,
+                content_type,
+                block_key,
                 title,
                 text_content,
                 resource_url,
-                alternative_text
+                alternative_text,
+                data
             FROM public.lesson_blocks
             WHERE lesson_id = %s
             ORDER BY display_order, id;
@@ -217,11 +220,31 @@ def get_lesson_detail(lesson_id, student_id):
             (lesson_id,),
         ).fetchall()
 
+        # مصادر الدرس (من الجدولين الموجودين)، مرتبطة على مستوى الدرس.
+        source_rows = connection.execute(
+            """
+            SELECT sd.title, sd.source_url
+            FROM public.lesson_sources AS ls
+            JOIN public.source_documents AS sd
+              ON sd.id = ls.source_document_id
+            WHERE ls.lesson_id = %s
+            ORDER BY ls.id;
+            """,
+            (lesson_id,),
+        ).fetchall()
+
     # تجميع البلوكات في أقسام مرتبة. ترتيب القسم = أصغر display_order فيه
-    # (أول ظهور لأن الصفوف مرتبة تصاعديًا).
+    # (أول ظهور لأن الصفوف مرتبة تصاعديًا). بلوكات المسرد (content_type=
+    # 'glossary') تُرفَع إلى مستوى الدرس ولا تظهر ضمن الأقسام المرئية.
     sections = []
     index = {}
+    terms = []
     for block in blocks:
+        data = block["data"] or {}
+        if block["content_type"] == "glossary":
+            terms = data.get("terms", [])
+            continue
+
         key = block["section"]
         if key not in index:
             index[key] = {
@@ -232,10 +255,18 @@ def get_lesson_detail(lesson_id, student_id):
             sections.append(index[key])
         index[key]["blocks"].append(
             {
-                "display_order": block["display_order"],
                 "block_type": block["block_type"],
+                "content_type": block["content_type"] or "text",
+                "block_key": block["block_key"],
+                "display_order": block["display_order"],
                 "title": block["title"],
                 "text": block["text_content"],
+                "segments": data.get("segments"),
+                "structure_key": data.get("structure_key"),
+                "abbreviation": data.get("abbreviation"),
+                "key_point": data.get("key_point"),
+                "comparison": data.get("comparison"),
+                "think_reveal": data.get("think_reveal"),
                 "resource_url": block["resource_url"],
                 "alternative_text": block["alternative_text"],
             }
@@ -249,4 +280,9 @@ def get_lesson_detail(lesson_id, student_id):
         "is_available": lesson["is_content_ready"],
         "status": lesson["progress_status"] or "not_started",
         "sections": sections,
+        "terms": terms,
+        "sources": [
+            {"title": r["title"], "url": r["source_url"]}
+            for r in source_rows
+        ],
     }

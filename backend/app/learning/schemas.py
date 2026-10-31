@@ -88,20 +88,65 @@ class SubjectOutlineResponse(BaseModel):
 # --- تفاصيل الدرس: أقسام مرتبة، كل قسم قائمة بلوكات مرتبة ---
 
 
+class TextSegment(BaseModel):
+    # جزء من النص؛ term_id يربطه بمصطلح قابل للضغط (أو null لنصّ عادي).
+    # تجميع نصوص segments بالترتيب يساوي text الكامل للبلوك.
+    text: str
+    term_id: str | None = None
+
+
+class ComparisonTable(BaseModel):
+    columns: list[str]
+    rows: list[list[str]]
+
+
+class ThinkReveal(BaseModel):
+    # نشاط Think → Reveal (ليس امتحانًا؛ لا نقاط ولا تصحيح).
+    prompt: str
+    explanation: str
+
+
 class LessonBlock(BaseModel):
-    display_order: int
+    # block_type يبقى 'text' للبلوكات النصّية/المنظّمة (قيد lesson_blocks).
     block_type: Literal["text", "image", "video", "model_3d"]
+    # نوع العرض المنطقي: text/intro/chamber/comparison/think_reveal.
+    content_type: str
+    # مفتاح ثابت للبلوك (قد يكون null لبلوكات قديمة قبل الترقية).
+    block_key: str | None
+    display_order: int
     title: str | None
-    text: str | None  # مصدره lesson_blocks.text_content.
+    text: str | None  # النص الكامل (مصدره text_content).
+    # النص مقسّمًا إلى أجزاء مرتبطة بالمصطلحات (للبلوكات النصّية/الحجرات).
+    segments: list[TextSegment] | None = None
+    # حقول بطاقة الحجرة (content_type='chamber') فقط:
+    structure_key: str | None = None  # معرّف تعليمي لربط 3D لاحقًا (ليس mesh).
+    abbreviation: str | None = None
+    key_point: str | None = None
+    # جدول المقارنة (content_type='comparison') فقط:
+    comparison: ComparisonTable | None = None
+    # نشاط Think→Reveal (content_type='think_reveal') فقط:
+    think_reveal: ThinkReveal | None = None
     resource_url: str | None  # لا تُحقن روابط وهمية؛ null ما لم يوجد أصل حقيقي.
     alternative_text: str | None
 
 
 class LessonSection(BaseModel):
-    # مفتاح القسم (مثل "overview")، من lesson_blocks.section.
+    # مفتاح القسم (مثل "overview" أو "core_anatomy")، من lesson_blocks.section.
     key: str
     display_order: int
     blocks: list[LessonBlock]
+
+
+class GlossaryTerm(BaseModel):
+    # مصطلح قابل للضغط، معرّفه ثابت (id) ويُشار إليه من segments[].term_id.
+    id: str
+    definition: str
+    plural: str | None = None
+
+
+class LessonSource(BaseModel):
+    title: str
+    url: str | None
 
 
 class LessonDetailResponse(BaseModel):
@@ -116,3 +161,7 @@ class LessonDetailResponse(BaseModel):
     is_available: bool
     status: Literal["not_started", "in_progress", "completed"]
     sections: list[LessonSection]
+    # مسرد المصطلحات على مستوى الدرس (يُخزَّن مرة واحدة ويُعاد مع الدرس).
+    terms: list[GlossaryTerm]
+    # مصادر الدرس (من source_documents + lesson_sources).
+    sources: list[LessonSource]

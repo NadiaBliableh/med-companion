@@ -68,25 +68,41 @@ def seed_overview():
             (lesson_id, SECTION),
         ).fetchone()["n"]
         if existing:
+            # backfill آمن لمفاتيح البلوكات القديمة (قبل migration 004) دون
+            # المساس بالنص المُدخَل: يضبط block_key/content_type حيث هي NULL فقط.
+            connection.execute(
+                "UPDATE public.lesson_blocks SET block_key='overview_intro', "
+                "content_type='text' WHERE lesson_id=%s AND section=%s "
+                "AND display_order=1 AND block_key IS NULL;",
+                (lesson_id, SECTION),
+            )
+            connection.execute(
+                "UPDATE public.lesson_blocks SET "
+                "block_key='overview_objectives', content_type='text' "
+                "WHERE lesson_id=%s AND section=%s AND display_order=2 "
+                "AND block_key IS NULL;",
+                (lesson_id, SECTION),
+            )
             print(f"overview already present for lesson_id={lesson_id} "
-                  f"({existing} blocks); no change.")
+                  f"({existing} blocks); backfilled block_key/content_type "
+                  "where missing; text unchanged.")
             return
 
         connection.execute(
             """
             INSERT INTO public.lesson_blocks
-                (lesson_id, section, block_type, title, text_content,
-                 display_order)
-            VALUES (%s, %s, 'text', %s, %s, 1);
+                (lesson_id, section, block_type, content_type, block_key,
+                 title, text_content, display_order)
+            VALUES (%s, %s, 'text', 'text', 'overview_intro', %s, %s, 1);
             """,
             (lesson_id, SECTION, LESSON_EN, INTRODUCTION),
         )
         connection.execute(
             """
             INSERT INTO public.lesson_blocks
-                (lesson_id, section, block_type, title, text_content,
-                 display_order)
-            VALUES (%s, %s, 'text', %s, %s, 2);
+                (lesson_id, section, block_type, content_type, block_key,
+                 title, text_content, display_order)
+            VALUES (%s, %s, 'text', 'text', 'overview_objectives', %s, %s, 2);
             """,
             (lesson_id, SECTION, "Learning objectives", "\n".join(OBJECTIVES)),
         )
