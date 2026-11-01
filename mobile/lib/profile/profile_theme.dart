@@ -10,6 +10,12 @@ const Color pNeonCyan = Color(0xFF32DFFF);
 const Color pMuted = Color(0xFF9DB8CB);
 const Color pDivider = Color(0xFF07536B);
 
+// ألوان تصميم البروفايل الجديد
+const Color pTeal = Color(0xFF4FD1C5);
+const Color pCard = Color(0xFF0D1520);
+const Color pCardBorder = Color(0xFF1C2A38);
+const Color pTrack = Color(0xFF1E2A36);
+
 String get unspecifiedLabel => tr('غير محدد', 'Not specified');
 
 const _years = ['الأولى', 'الثانية', 'الثالثة', 'الرابعة', 'الخامسة', 'السادسة'];
@@ -22,10 +28,19 @@ String studyYearLabel(int? year) {
 String languageLabel(String code) => code == 'en' ? 'English' : 'العربية';
 
 BoxDecoration cardDecoration() => BoxDecoration(
-      color: pField.withValues(alpha: 0.78),
-      borderRadius: BorderRadius.circular(24),
-      border: Border.all(color: pNeonBlue.withValues(alpha: 0.55), width: 1),
+      color: pCard,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: pCardBorder, width: 1),
     );
+
+/// ثواني -> 7h 45m / 7 س 45 د
+String formatDuration(int seconds) {
+  final s = seconds < 0 ? 0 : seconds;
+  final h = s ~/ 3600;
+  final m = (s % 3600) ~/ 60;
+  if (h > 0) return tr('$h س $m د', '${h}h ${m}m');
+  return tr('$m د', '${m}m');
+}
 
 class GradientBackground extends StatelessWidget {
   const GradientBackground({super.key, required this.child});

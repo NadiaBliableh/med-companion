@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'services/auth_service.dart';
-import 'profile/profile_entry.dart';
+//import 'profile/profile_entry.dart';
 import 'l10n/app_language.dart';
+import 'shell/main_shell.dart';
 
 void main() {
   runApp(const MedCompanionApp());
@@ -96,7 +97,7 @@ Future<void> _login() async {
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => ProfileEntry(
+        builder: (_) => MainShell(
           loginBuilder: () => const LoginScreen(),
         ),
       ),
