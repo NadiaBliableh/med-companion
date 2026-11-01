@@ -214,8 +214,9 @@ class _TopicCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 InfoChip(label: tr('قريبًا', 'Coming soon')),
-                InfoChip(label: tr('الدروس: ${topic.lessonsCount}', '${topic.lessonsCount} lessons')),
-              ],
+InfoChip(label: tr('الدروس: ${topic.lessonsCount}',
+    topic.lessonsCount == 1 ? '1 lesson' : '${topic.lessonsCount} lessons')),
+     ],
             ),
           const SizedBox(height: 8),
           const Divider(height: 1, color: pCardBorder),

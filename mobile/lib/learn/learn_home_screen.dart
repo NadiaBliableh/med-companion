@@ -195,9 +195,11 @@ class _SubjectCard extends StatelessWidget {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    InfoChip(label: tr('الوحدات: ${subject.topicsCount}', '${subject.topicsCount} units')),
-                    InfoChip(label: tr('الدروس: ${subject.lessonsCount}', '${subject.lessonsCount} lessons')),
-                    subject.availableLessonsCount > 0
+                   InfoChip(label: tr('الوحدات: ${subject.topicsCount}',
+    subject.topicsCount == 1 ? '1 unit' : '${subject.topicsCount} units')),
+InfoChip(label: tr('الدروس: ${subject.lessonsCount}',
+    subject.lessonsCount == 1 ? '1 lesson' : '${subject.lessonsCount} lessons')),
+     subject.availableLessonsCount > 0
                         ? InfoChip(
                             highlight: true,
                             label: tr('${subject.availableLessonsCount} دروس متاحة',
